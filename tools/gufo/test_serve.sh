@@ -14,7 +14,9 @@ cat > "$t/bin/podman" <<STUB
 S=$t/state
 case "\$1" in
   run)
-    shift; cid=\$(date +%s%N); name=; cidfile=
+    shift
+    printf '%s\n' "\$@" > "\$S/last-args"
+    cid=\$(date +%s%N); name=; cidfile=
     while [ \$# -gt 0 ]; do case "\$1" in --cidfile) cidfile=\$2; shift ;; --name) name=\$2; shift ;; esac; shift; done
     setsid bash -c 'exec -a "stub-container $t \$0" sleep 300' "\$cid" < /dev/null > /dev/null 2>&1 &
     echo \$! > "\$S/\$cid"; echo "\$cid" > "\$S/name-\$name"; echo "\$cid" > "\$cidfile"
@@ -51,6 +53,18 @@ check "the first container is removed" 'waitfor "! alive $c1"'
 sleep 1.5
 check "the second is not" 'alive "$c2"'
 kill -KILL -- "-$s2"; waitfor "! alive $c2"
+
+# the host zone is an argument of podman run, so container logs use the host clock
+export TZ=Europe/Helsinki
+s=$(start tz); waitfor '[ -n "$(container tz)" ]'
+check "podman run receives the host TZ" 'grep -qx "TZ=Europe/Helsinki" "$t/state/last-args"'
+kill -KILL -- "-$s"; waitfor '! alive "$(container tz)"'
+
+rm -f "$t/state/last-args"
+unset TZ
+s=$(start zu); waitfor 'grep -q "^TZ=" "$t/state/last-args" 2>/dev/null'
+check "without TZ, a zone name is still passed" 'grep -Eq "^TZ=[A-Za-z0-9_+/-]+$" "$t/state/last-args"'
+kill -KILL -- "-$s"; waitfor '! alive "$s"'
 
 echo "gufo serve.sh: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]
