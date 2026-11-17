@@ -58,7 +58,24 @@ kill -KILL -- "-$s2"; waitfor "! alive $c2"
 export TZ=Europe/Helsinki
 s=$(start tz); waitfor '[ -n "$(container tz)" ]'
 check "podman run receives the host TZ" 'grep -qx "TZ=Europe/Helsinki" "$t/state/last-args"'
+if [ -d /usr/share/zoneinfo ]; then
+  check "the host zoneinfo is mounted read-only" 'grep -qx "/usr/share/zoneinfo:/usr/share/zoneinfo:ro" "$t/state/last-args"'
+fi
 kill -KILL -- "-$s"; waitfor '! alive "$(container tz)"'
+
+# TZ cannot resolve without the zone database. A directory that exists is mounted; one that does not is left off.
+mkdir -p "$t/zoneinfo"
+export GUFO_ZONEINFO="$t/zoneinfo"
+rm -f "$t/state/last-args"
+s=$(start zi); waitfor '[ -n "$(container zi)" ]'
+check "a present zoneinfo directory is mounted read-only" "grep -qx '$t/zoneinfo:/usr/share/zoneinfo:ro' '$t/state/last-args'"
+kill -KILL -- "-$s"; waitfor '! alive "$(container zi)"'
+export GUFO_ZONEINFO="$t/no-such-zoneinfo"
+rm -f "$t/state/last-args"
+s=$(start zn); waitfor '[ -n "$(container zn)" ]'
+check "a missing zoneinfo directory is not mounted" '! grep -q zoneinfo "$t/state/last-args"'
+kill -KILL -- "-$s"; waitfor '! alive "$(container zn)"'
+unset GUFO_ZONEINFO
 
 rm -f "$t/state/last-args"
 unset TZ

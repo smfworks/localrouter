@@ -8,7 +8,8 @@
 # covered by a watcher in its own session, which removes this run's container (by id) once the script is gone.
 # `--replace` clears a container left over from anything else.
 # Environment: GUFO_IMAGE (default: tools/gufo/IMAGE, the runtime pinned by digest), GUFO_STOP_TIMEOUT (default 10 s),
-# TZ (the host zone passed into the container; unset: read from the host).
+# TZ (the host zone passed into the container; unset: read from the host). The image has no zoneinfo of its own, so
+# when the host has one it is mounted read-only at /usr/share/zoneinfo (GUFO_ZONEINFO overrides that host path).
 # An image named without @sha256: is refused unless GUFO_ALLOW_UNPINNED=1: a tag can move between two installs.
 # Devices: /dev/kfd and /dev/dri; the video and render groups are passed by name, since keep-groups needs crun and
 # many hosts run runc.
@@ -41,6 +42,10 @@ host_tz() {
   esac
 }
 tz=$(host_tz)
+# TZ alone leaves the container on UTC: the image ships neither /usr/share/zoneinfo nor /etc/localtime.
+zoneinfo=${GUFO_ZONEINFO:-/usr/share/zoneinfo}
+zi=()
+if [ -d "$zoneinfo" ]; then zi=(-v "${zoneinfo}:/usr/share/zoneinfo:ro"); fi
 cname="lr-gufo-$name"
 stop() { podman stop -t "${GUFO_STOP_TIMEOUT:-10}" "$cname" > /dev/null 2>&1 || true; wait "$pid" 2> /dev/null || true; exit 0; }
 trap stop TERM INT
@@ -54,6 +59,6 @@ setsid -f sh -c 'while kill -0 "$1" 2> /dev/null; do sleep 0.5; done
   gufo-watch "$$" "$run_dir" "${GUFO_STOP_TIMEOUT:-10}" < /dev/null > /dev/null 2>&1
 podman run --rm --replace --cidfile "$run_dir/cid" --name "$cname" --userns=keep-id:uid="$(id -u)",gid="$(id -g)" \
   --device /dev/kfd --device /dev/dri --group-add video --group-add render --ulimit memlock=-1 \
-  -e "TZ=$tz" -p "127.0.0.1:$port:8080" ${popts[@]+"${popts[@]}"} "$image" "${args[@]}" &
+  -e "TZ=$tz" ${zi[@]+"${zi[@]}"} -p "127.0.0.1:$port:8080" ${popts[@]+"${popts[@]}"} "$image" "${args[@]}" &
 pid=$!
 wait "$pid"
